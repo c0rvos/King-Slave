@@ -106,8 +106,7 @@ function cardEmoji(type) {
 
 function getCardHTML(card) {
     return `<div class="card ${card.type}">
-        <div class="card-emoji">${cardEmoji(card.type)}</div>
-        <div class="card-name">${card.name}</div>
+        <div class="card-illustration"></div>
     </div>`;
 }
 
@@ -205,6 +204,9 @@ socket.on('gameStart', data => {
 
     chatMessages.innerHTML = ''; // clear chat
 
+    // Save session for reconnection
+    localStorage.setItem('kingSlave_session', JSON.stringify({ gameId: data.gameId, playerName: myPlayerName }));
+
     showScreen('dice');
     setTimeout(() => initGame(data), 3200);
 });
@@ -260,7 +262,8 @@ function updateHand() {
     myHand.forEach((card, idx) => {
         const div = document.createElement('div');
         div.className = `card ${card.type}`;
-        div.innerHTML = `<div class="card-emoji">${cardEmoji(card.type)}</div><div class="card-name">${card.name}</div>`;
+        div.innerHTML = `<div class="card-illustration"></div>`;
+        div.title = card.name; // tooltip on hover for accessibility
         div.onclick = () => playCard(idx, card);
         yourHand.appendChild(div);
     });
@@ -424,10 +427,41 @@ function showGameOver(data) {
 }
 
 socket.on('error', msg => setMsg(`Error: ${msg}`, 'warn'));
+
+socket.on('waitingForReconnect', msg => {
+    setMsg(msg, 'warn');
+    disableCards(true);
+});
+
+socket.on('opponentReconnected', msg => {
+    setMsg(msg, 'info');
+    disableCards(false);
+});
+
 socket.on('opponentDisconnected', msg => {
     setMsg(`⚠ ${msg}`, 'warn');
     disableCards(true);
+    localStorage.removeItem('kingSlave_session');
     setTimeout(() => { showScreen('lobby'); resetLobbyUI(); }, 3000);
+});
+
+$('leaveGameBtn').onclick = () => {
+    if (confirm('Are you sure you want to leave the arena? You will lose the game.')) {
+        socket.emit('leaveGame', { gameId: currentGameId });
+        localStorage.removeItem('kingSlave_session');
+        showScreen('lobby');
+        resetLobbyUI();
+    }
+};
+
+// Check for existing session on load
+window.addEventListener('load', () => {
+    const session = localStorage.getItem('kingSlave_session');
+    if (session) {
+        const { gameId, playerName } = JSON.parse(session);
+        myPlayerName = playerName;
+        socket.emit('reconnectToGame', { gameId, playerName });
+    }
 });
 
 playAgainBtn.onclick = () => { showScreen('lobby'); resetLobbyUI(); };

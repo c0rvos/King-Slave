@@ -43,6 +43,20 @@
                     <button id="joinLobbyBtn" class="btn-horror">
                         <span>Enter the Condemned Arena</span>
                     </button>
+
+                    <!-- Card preview showcase -->
+                    <div class="card-showcase">
+                        <div class="showcase-card" style="transform: rotate(-8deg) translateY(5px);">
+                            <img src="assets/slave.jpg" alt="Slave">
+                        </div>
+                        <div class="showcase-card showcase-center" style="transform: scale(1.08) translateY(-5px);">
+                            <img src="assets/king.jpg" alt="King">
+                        </div>
+                        <div class="showcase-card" style="transform: rotate(8deg) translateY(5px);">
+                            <img src="assets/citizen.jpg" alt="Citizen">
+                        </div>
+                    </div>
+
                     <div class="scratch-line bottom-scratch"></div>
                 </div>
             </div>
@@ -160,20 +174,36 @@
 
             <!-- ══ GAME SCREEN ══ -->
             <div id="gameScreen" class="screen">
+
+                <!-- Reconnect Banner (hidden by default) -->
+                <div id="reconnectBanner" class="reconnect-banner hidden">
+                    <span id="reconnectMsg">⏳ Waiting for opponent to reconnect…</span>
+                    <div class="reconnect-timer-bar"><div id="reconnectTimerFill" class="reconnect-fill"></div></div>
+                </div>
+
                 <!-- HUD -->
                 <div class="game-hud">
                     <div class="hud-left">
                         <span id="roundDisplay" class="hud-badge">Round 1 / 10</span>
                         <span id="turnDisplay" class="hud-badge">Turn 1 / 5</span>
+                        <button id="leaveGameBtn" class="btn-leave">🏳 Leave</button>
                     </div>
                     <div class="hud-center">
                         <div class="player-badge">
+                            <div class="player-avatar">
+                                <!-- 👤 Replace src with 'assets/your-photo.jpg' -->
+                                <div class="avatar-placeholder">👤</div>
+                            </div>
                             <div id="yourEmote" class="emote-bubble"></div>
                             <span id="yourName" class="pname"></span>
                             <span id="yourRole" class="prole king">♔ KING</span>
                         </div>
                         <div class="hud-vs">⚔</div>
                         <div class="player-badge right">
+                            <div class="player-avatar">
+                                <!-- 👤 Replace src with 'assets/opp-photo.jpg' -->
+                                <div class="avatar-placeholder">👤</div>
+                            </div>
                             <div id="opponentEmote" class="emote-bubble"></div>
                             <span id="opponentName" class="pname"></span>
                             <span id="opponentRole" class="prole slave">⛓ SLAVE</span>

@@ -222,21 +222,88 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('leaveGame', ({ gameId }) => {
+        const game = games.get(gameId);
+        if (!game) return;
+
+        const oppId = game.player1Id === socket.id ? game.player2Id : game.player1Id;
+        const opp = players.get(oppId);
+        if (opp && opp.socket) {
+            opp.socket.emit('opponentDisconnected', 'Your opponent has fled the arena. You win by forfeit.');
+        }
+        games.delete(gameId);
+        console.log(`Player ${socket.id} left game ${gameId}`);
+    });
+
+    socket.on('reconnectToGame', ({ gameId, playerName }) => {
+        const game = games.get(gameId);
+        if (!game) return socket.emit('error', 'Game no longer exists.');
+
+        const isP1 = game.player1Name === playerName;
+        const isP2 = game.player2Name === playerName;
+
+        if (isP1) {
+            game.player1Id = socket.id;
+            game.player1Disconnected = false;
+        } else if (isP2) {
+            game.player2Id = socket.id;
+            game.player2Disconnected = false;
+        } else {
+            return socket.emit('error', 'You were not in this game.');
+        }
+
+        socket.playerName = playerName;
+        players.set(socket.id, { name: playerName, socket });
+
+        // Resend game state
+        socket.emit('gameStart', {
+            gameId, 
+            playerId: isP1 ? 'player1' : 'player2',
+            playerName: playerName,
+            opponentName: isP1 ? game.player2Name : game.player1Name,
+            hand: isP1 ? game.player1Hand : game.player2Hand,
+            currentRole: isP1 ? game.player1Role : game.player2Role,
+            currentRound: game.currentRound,
+            isReconnect: true,
+            diceResult: game.initialDiceResult // We should store this in game object
+        });
+
+        const oppId = isP1 ? game.player2Id : game.player1Id;
+        const opp = players.get(oppId);
+        if (opp && opp.socket) {
+            opp.socket.emit('opponentReconnected', `${playerName} has returned to the arena.`);
+        }
+    });
+
     socket.on('disconnect', () => {
         const i = waitingPlayers.indexOf(socket.id);
         if (i !== -1) waitingPlayers.splice(i, 1);
 
-        // Clean up hosted lobbies
         for (let [code, lobby] of lobbies.entries()) {
             if (lobby.hostId === socket.id) lobbies.delete(code);
         }
 
         for (let [gameId, game] of games.entries()) {
             if (game.player1Id === socket.id || game.player2Id === socket.id) {
-                const oppId = game.player1Id === socket.id ? game.player2Id : game.player1Id;
+                const isP1 = game.player1Id === socket.id;
+                if (isP1) game.player1Disconnected = true;
+                else game.player2Disconnected = true;
+
+                const oppId = isP1 ? game.player2Id : game.player1Id;
                 const opp = players.get(oppId);
-                if (opp && opp.socket) opp.socket.emit('opponentDisconnected', 'Your opponent left the game.');
-                games.delete(gameId);
+                
+                if (opp && opp.socket) {
+                    opp.socket.emit('waitingForReconnect', 'Your opponent disconnected. Waiting 60s for them to return...');
+                }
+
+                // Start removal timer (60 seconds)
+                setTimeout(() => {
+                    const latestGame = games.get(gameId);
+                    if (latestGame && (latestGame.player1Disconnected || latestGame.player2Disconnected)) {
+                        if (opp && opp.socket) opp.socket.emit('opponentDisconnected', 'Opponent failed to reconnect. Game terminated.');
+                        games.delete(gameId);
+                    }
+                }, 60000);
                 break;
             }
         }
@@ -254,4 +321,8 @@ setInterval(() => {
 }, 60000);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🎮 Server running on http://localhost:${PORT}`));
+if (require.main === module) {
+    server.listen(PORT, () => console.log(`🎮 Server running on http://localhost:${PORT}`));
+}
+
+module.exports = server;

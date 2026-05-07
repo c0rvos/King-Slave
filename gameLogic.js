@@ -102,7 +102,12 @@ function applyPlay(game) {
 
     game.currentTurn++;
 
-    const roundEnded = game.player1Hand.length === 0 || game.player2Hand.length === 0;
+    // Round ends if hands are empty OR if someone played a King
+    const roundEnded = game.player1Hand.length === 0 || 
+                       game.player2Hand.length === 0 ||
+                       card1.type === 'king' || 
+                       card2.type === 'king';
+    
     let gameOver = false, winner_name = null;
 
     // Full game end: last round, last turn
