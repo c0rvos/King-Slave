@@ -364,10 +364,10 @@ function playCard(idx, card) {
     const playedCard = yourPlayedZone.querySelector('.card');
     if (playedCard) {
         playedCard.classList.add('card-play-anim');
-        // King/Slave — flash red ring (round-ending card)
-        if (card.type === 'king' || card.type === 'slave') {
+        // King — flash red ring (round-ending card)
+        if (card.type === 'king') {
             playedCard.classList.add('card-round-ender');
-            showCardFlash(card.type === 'king' ? '♔ KING PLAYED — ROUND ENDS!' : '⛓ SLAVE PLAYED — ROUND ENDS!', card.type);
+            showCardFlash('♔ KING PLAYED — ROUND ENDS!', 'king');
         }
     }
     setMsg('Waiting for opponent...', '');
@@ -485,20 +485,25 @@ if (chatToggle) chatToggle.onclick = closeChat;
 chatSendBtn.onclick = sendChat;
 chatInput.onkeydown = e => { if (e.key === 'Enter') sendChat(); };
 
+function appendChatMsg(senderName, text, isMe) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${isMe ? 'mine' : ''}`;
+    div.innerHTML = `<div class="chat-msg-header"><span class="chat-msg-name">${senderName}</span></div><div class="chat-msg-text">${text}</div>`;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
 function sendChat() {
     const text = chatInput.value.trim();
     if (!text || !currentGameId) return;
     socket.emit('chatMessage', { gameId: currentGameId, text });
+    appendChatMsg(myPlayerName, text, true);
     chatInput.value = '';
 }
 
 socket.on('chatMessage', data => {
-    const isMe = data.senderName === myPlayerName;
-    const div = document.createElement('div');
-    div.className = `chat-msg ${isMe ? 'mine' : ''}`;
-    div.innerHTML = `<div class="chat-msg-header"><span class="chat-msg-name">${data.senderName}</span></div><div class="chat-msg-text">${data.text}</div>`;
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    if (data.senderName === myPlayerName) return; // already appended locally
+    appendChatMsg(data.senderName, data.text, false);
     if (chatSidebar.classList.contains('collapsed') && chatNotif) {
         chatNotif.classList.remove('hidden');
     }
@@ -589,41 +594,6 @@ socket.on('opponentDisconnected', msg => {
     disableCards(true);
     sessionStorage.removeItem('kingSlave_session');
     setTimeout(() => { showScreen('lobby'); resetLobbyUI(); }, 3000);
-});
-
-socket.on('reconnectGame', data => {
-    currentGameId   = data.gameId;
-    currentPlayerId = data.playerId;
-    currentRound    = data.currentRound;
-    myHand          = data.hand;
-    myHistory       = data.yourHistory || [];
-    currentTurn     = data.currentTurn;
-    
-    fitName(yourName, data.playerName);
-    fitName(opponentName, data.opponentName);
-    
-    setRole(data.currentRole);
-    updateHand();
-    updateScores(data.yourScore, data.opponentScore);
-    updateHud();
-    
-    opponentCardsLeft.textContent = data.opponentCardsLeft;
-    if (myHistory.length > 0) {
-        yourHistory.textContent = myHistory.map(c => cardEmoji(c.type)).join(' ');
-    } else {
-        yourHistory.textContent = '—';
-    }
-    
-    yourPlayedZone.innerHTML = '<div class="card-unknown">—</div>';
-    opponentFlipCard.classList.remove('flipped');
-    opponentPlay.innerHTML = '';
-    oppPlayStatus.textContent = 'waiting...';
-    oppPlayStatus.classList.remove('played');
-    waitingPlay = false;
-    disableCards(false);
-    setMsg('Reconnected. Play a card.', '');
-    
-    showScreen('game');
 });
 
 // ══════════════════════════════════════════════════

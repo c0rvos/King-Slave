@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const { createGame, applyPlay, initializeDecks } = require('./gameLogic');
+const { createGame, applyPlay, initializeDecks, advanceToNextRound } = require('./gameLogic');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,21 +23,26 @@ function generateLobbyCode() {
 
 function startGame(socket1, socket2, name1, name2) {
     const gameId = Date.now().toString();
-    const roll1 = Math.floor(Math.random() * 100) + 1;
-    const roll2 = Math.floor(Math.random() * 100) + 1;
-    const p1IsKing = roll1 >= roll2;
+    
+    let roll1, roll2;
+    do {
+        roll1 = Math.floor(Math.random() * 6) + 1;
+        roll2 = Math.floor(Math.random() * 6) + 1;
+    } while (roll1 === roll2);
+
+    const p1IsKing = roll1 > roll2;
     const { deck1, deck2 } = initializeDecks(p1IsKing);
     const game = createGame(socket1.id, socket2.id, name1, name2, deck1, deck2, p1IsKing);
     games.set(gameId, game);
 
     socket1.emit('gameStart', {
         gameId, playerId: 'player1', playerName: name1, opponentName: name2,
-        hand: game.player1Hand, currentRole: game.player1Role, currentRound: game.currentRound,
+        hand: game.player1Hand, currentRole: game.player1Role, currentRound: game.overallRound,
         diceResult: { yourRoll: roll1, opponentRoll: roll2, winner: p1IsKing ? name1 : name2, youAreKingFirst: p1IsKing }
     });
     socket2.emit('gameStart', {
         gameId, playerId: 'player2', playerName: name2, opponentName: name1,
-        hand: game.player2Hand, currentRole: game.player2Role, currentRound: game.currentRound,
+        hand: game.player2Hand, currentRole: game.player2Role, currentRound: game.overallRound,
         diceResult: { yourRoll: roll2, opponentRoll: roll1, winner: p1IsKing ? name1 : name2, youAreKingFirst: !p1IsKing }
     });
 
@@ -138,7 +143,7 @@ io.on('connection', (socket) => {
         if (!game) return;
         if (game.player1Id !== socket.id && game.player2Id !== socket.id) return;
 
-        const senderName = socket.playerName || 'Unknown';
+        const senderName = game.player1Id === socket.id ? game.player1Name : game.player2Name;
         const payload = { senderName, text: trimmed, ts: Date.now() };
         io.to(game.player1Id).emit('chatMessage', payload);
         io.to(game.player2Id).emit('chatMessage', payload);
@@ -181,7 +186,7 @@ io.on('connection', (socket) => {
                 yourHand: game.player1Hand.map(c => ({ type: c.type, name: c.name })),
                 opponentCardsLeft: game.player2Hand.length,
                 yourHistory: game.player1History, opponentPlay: result.player2Card,
-                currentRound: game.currentRound, currentTurn: game.currentTurn,
+                currentRound: game.overallRound, currentTurn: game.currentTurn,
                 gameOver: result.gameOver,
                 winner: result.winner, yourRole: game.player1Role
             });
@@ -191,7 +196,7 @@ io.on('connection', (socket) => {
                 yourHand: game.player2Hand.map(c => ({ type: c.type, name: c.name })),
                 opponentCardsLeft: game.player1Hand.length,
                 yourHistory: game.player2History, opponentPlay: result.player1Card,
-                currentRound: game.currentRound, currentTurn: game.currentTurn,
+                currentRound: game.overallRound, currentTurn: game.currentTurn,
                 gameOver: result.gameOver,
                 winner: result.winner, yourRole: game.player2Role
             });
@@ -199,20 +204,22 @@ io.on('connection', (socket) => {
             game.player1PlayPending = false; game.player2PlayPending = false;
             game.player1Play = null; game.player2Play = null;
 
-            // Trigger next round when one of the hands is empty
-            const shouldAdvanceRound = !result.gameOver && game.currentRound < game.totalRounds && result.roundEnded;
+            // Trigger next round if the match is not over but the round ended
+            const shouldAdvanceRound = !result.gameOver && result.roundEnded;
 
             if (shouldAdvanceRound) {
                 setTimeout(() => {
-                    game.player1Role = game.player1Role === 'king' ? 'slave' : 'king';
-                    game.player2Role = game.player2Role === 'king' ? 'slave' : 'king';
-                    game.currentRound++;
-                    game.currentTurn = 0;
-                    const { deck1, deck2 } = initializeDecks(game.player1Role === 'king');
-                    game.player1Hand = deck1; game.player2Hand = deck2;
-                    game.player1History = []; game.player2History = [];
-                    io.to(game.player1Id).emit('nextRound', { newRound: game.currentRound, newRole: game.player1Role, newHand: game.player1Hand.map(c => ({ type: c.type, name: c.name })) });
-                    io.to(game.player2Id).emit('nextRound', { newRound: game.currentRound, newRole: game.player2Role, newHand: game.player2Hand.map(c => ({ type: c.type, name: c.name })) });
+                    const next = advanceToNextRound(game);
+                    io.to(game.player1Id).emit('nextRound', { 
+                        newRound: next.overallRound, 
+                        newRole: next.player1Role, 
+                        newHand: next.player1Hand.map(c => ({ type: c.type, name: c.name })) 
+                    });
+                    io.to(game.player2Id).emit('nextRound', { 
+                        newRound: next.overallRound, 
+                        newRole: next.player2Role, 
+                        newHand: next.player2Hand.map(c => ({ type: c.type, name: c.name })) 
+                    });
                 }, 2800);
             }
 
@@ -221,6 +228,8 @@ io.on('connection', (socket) => {
             socket.emit('waitingForOpponent', 'Waiting for opponent...');
         }
     });
+
+
 
     socket.on('leaveGame', ({ gameId }) => {
         const game = games.get(gameId);
@@ -256,16 +265,20 @@ io.on('connection', (socket) => {
         players.set(socket.id, { name: playerName, socket });
 
         // Resend game state
-        socket.emit('gameStart', {
+        // Send full game state for reconnect
+        socket.emit('reconnectGame', {
             gameId, 
             playerId: isP1 ? 'player1' : 'player2',
             playerName: playerName,
             opponentName: isP1 ? game.player2Name : game.player1Name,
             hand: isP1 ? game.player1Hand : game.player2Hand,
             currentRole: isP1 ? game.player1Role : game.player2Role,
-            currentRound: game.currentRound,
-            isReconnect: true,
-            diceResult: game.initialDiceResult // We should store this in game object
+            currentRound: game.overallRound,
+            currentTurn: game.currentTurn,
+            yourScore: isP1 ? game.player1Score : game.player2Score,
+            opponentScore: isP1 ? game.player2Score : game.player1Score,
+            opponentCardsLeft: isP1 ? game.player2Hand.length : game.player1Hand.length,
+            yourHistory: isP1 ? game.player1History : game.player2History
         });
 
         const oppId = isP1 ? game.player2Id : game.player1Id;

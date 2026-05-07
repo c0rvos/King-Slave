@@ -1,135 +1,203 @@
-// Card definitions
+// ══════════════════════════════════════════════════
+//  KING vs SLAVE — Game Logic
+//  Match = 4 games × 3 rounds = 12 rounds total
+//  Roles alternate each game. Player who won dice starts as King.
+// ══════════════════════════════════════════════════
+
 const CARDS = {
-    king:    { name: 'King',    type: 'king',    emoji: '♔', value: 'king'    },
-    slave:   { name: 'Slave',   type: 'slave',   emoji: '⛓', value: 'slave'   },
-    citizen: { name: 'Citizen', type: 'citizen', emoji: '☠', value: 'citizen' }
+    king:    { name: 'King',    type: 'king',    emoji: '♔' },
+    slave:   { name: 'Slave',   type: 'slave',   emoji: '⛓' },
+    citizen: { name: 'Citizen', type: 'citizen', emoji: '☠' }
 };
 
-// Initialize decks based on role (King side or Slave side)
-function initializeDecks(firstPlayerIsKing) {
-    let deck1 = [], deck2 = [];
-    if (firstPlayerIsKing) {
-        deck1.push({ ...CARDS.king });
-        for (let i = 0; i < 3; i++) deck1.push({ ...CARDS.citizen });
-        deck2.push({ ...CARDS.slave });
-        for (let i = 0; i < 4; i++) deck2.push({ ...CARDS.citizen });
-    } else {
-        deck1.push({ ...CARDS.slave });
-        for (let i = 0; i < 4; i++) deck1.push({ ...CARDS.citizen });
-        deck2.push({ ...CARDS.king });
-        for (let i = 0; i < 3; i++) deck2.push({ ...CARDS.citizen });
-    }
-    function shuffle(deck) {
-        for (let i = deck.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [deck[i], deck[j]] = [deck[j], deck[i]];
-        }
-        return deck;
-    }
-    return { deck1: shuffle(deck1), deck2: shuffle(deck2) };
+// Each player always gets 5 cards: the role card + 4 citizens
+function buildHand(role) {
+    const hand = [{ ...CARDS[role] }];
+    for (let i = 0; i < 4; i++) hand.push({ ...CARDS.citizen });
+    return shuffle(hand);
 }
 
-// Create a new game
-function createGame(player1Id, player2Id, player1Name, player2Name, deck1, deck2, firstPlayerIsKing) {
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+// initializeDecks: p1IsKing tells us role of player1 for this game
+function initializeDecks(p1IsKing) {
     return {
-        player1Id, player2Id, player1Name, player2Name,
-        player1Hand: deck1, player2Hand: deck2,
-        player1Role: firstPlayerIsKing ? 'king' : 'slave',
-        player2Role: firstPlayerIsKing ? 'slave' : 'king',
-        player1Score: 0, player2Score: 0,
-        player1History: [], player2History: [],
-        player1Play: null, player2Play: null,
-        player1PlayPending: false, player2PlayPending: false,
-        currentTurn: 0, currentRound: 1,
-        totalRounds: 10,  // total rounds
-        gameOver: false, winner: null
+        deck1: buildHand(p1IsKing ? 'king' : 'slave'),
+        deck2: buildHand(p1IsKing ? 'slave' : 'king')
     };
 }
 
-function getWinner(cardA, cardB) {
-    if (cardA.type === cardB.type) return 'tie';
-    if (cardA.type === 'king'    && cardB.type === 'citizen') return 'playerA';
-    if (cardB.type === 'king'    && cardA.type === 'citizen') return 'playerB';
-    if (cardA.type === 'citizen' && cardB.type === 'slave')   return 'playerA';
-    if (cardB.type === 'citizen' && cardA.type === 'slave')   return 'playerB';
-    if (cardA.type === 'slave'   && cardB.type === 'king')    return 'playerA';
-    if (cardB.type === 'slave'   && cardA.type === 'king')    return 'playerB';
+// createGame — initialises entire match state
+function createGame(p1Id, p2Id, p1Name, p2Name, deck1, deck2, p1IsKing) {
+    return {
+        player1Id:   p1Id,   player2Id:   p2Id,
+        player1Name: p1Name, player2Name: p2Name,
+
+        // Hands
+        player1Hand: deck1, player2Hand: deck2,
+
+        // Roles (flip each game)
+        player1Role: p1IsKing ? 'king' : 'slave',
+        player2Role: p1IsKing ? 'slave' : 'king',
+
+        // Scores (cumulative across all 12 rounds)
+        player1Score: 0, player2Score: 0,
+
+        // History per round (cleared each round)
+        player1History: [], player2History: [],
+
+        // Current play
+        player1Play: null, player2Play: null,
+        player1PlayPending: false, player2PlayPending: false,
+
+        // Match structure: 4 games × 3 rounds
+        totalGames:    4,
+        roundsPerGame: 3,
+        gameNumber:    1,   // which game we're in (1-4)
+        roundInGame:   1,   // which round within the current game (1-3)
+        overallRound:  1,   // 1-12
+
+        // p1WasKingFirst: true means in game 1 p1 is king
+        p1WasKingFirst: p1IsKing,
+
+        gameOver: false,
+        winner:   null
+    };
+}
+
+// ── Win condition ──────────────────────────────────
+// King > Citizen, Citizen > Slave, Slave > King, same = Draw
+function getWinner(c1, c2) {
+    if (c1.type === c2.type) return 'tie';
+    if (c1.type === 'king'    && c2.type === 'citizen') return 'p1';
+    if (c2.type === 'king'    && c1.type === 'citizen') return 'p2';
+    if (c1.type === 'citizen' && c2.type === 'slave')   return 'p1';
+    if (c2.type === 'citizen' && c1.type === 'slave')   return 'p2';
+    if (c1.type === 'slave'   && c2.type === 'king')    return 'p1';
+    if (c2.type === 'slave'   && c1.type === 'king')    return 'p2';
     return 'tie';
 }
 
-function calculatePoints(winner, cardA, cardB) {
-    if (winner === 'playerA' && cardA.type === 'slave'  && cardB.type === 'king')  return 5;
-    if (winner === 'playerB' && cardB.type === 'slave'  && cardA.type === 'king')  return 5;
-    return 1;
+// ── Scoring ────────────────────────────────────────
+// Slave beats King  → 5 pts
+// Citizen beats Slave → 2 pts
+// King beats Citizen → 3 pts  (King card was played → round ends)
+// Draw → 0
+function calculatePoints(winner, c1, c2) {
+    if (winner === 'tie') return 0;
+    const wc = winner === 'p1' ? c1 : c2;
+    const lc = winner === 'p1' ? c2 : c1;
+    if (wc.type === 'slave'   && lc.type === 'king')    return 5;
+    if (wc.type === 'citizen' && lc.type === 'slave')   return 2;
+    if (wc.type === 'king'    && lc.type === 'citizen') return 1;
+    return 0;
 }
 
-
-
+// ── Apply a play ───────────────────────────────────
 function applyPlay(game) {
-    const card1      = game.player1Play.card;
-    const card2      = game.player2Play.card;
-    const card1Index = game.player1Play.cardIndex;
-    const card2Index = game.player2Play.cardIndex;
+    const c1 = game.player1Play.card;
+    const c2 = game.player2Play.card;
+    const i1 = game.player1Play.cardIndex;
+    const i2 = game.player2Play.cardIndex;
 
-    const winner = getWinner(card1, card2);
+    const winner = getWinner(c1, c2);
+    let pts1 = 0, pts2 = 0;
+    let msg1 = '', msg2 = '';
 
-    let points1 = 0, points2 = 0;
-    let resultMessage1 = '', resultMessage2 = '';
-
-    if (winner === 'playerA') {
-        points1 = calculatePoints(winner, card1, card2);
-        const ptsTxt = points1 === 5 ? '5 POINTS' : '1 point';
-        resultMessage1 = `You won — ${card1.name} beats ${card2.name} · ${ptsTxt}`;
-        resultMessage2 = `Opponent won — ${card1.name} beats ${card2.name}`;
-    } else if (winner === 'playerB') {
-        points2 = calculatePoints(winner, card1, card2);
-        const ptsTxt = points2 === 5 ? '5 POINTS' : '1 point';
-        resultMessage1 = `Opponent won — ${card2.name} beats ${card1.name}`;
-        resultMessage2 = `You won — ${card2.name} beats ${card1.name} · ${ptsTxt}`;
+    if (winner === 'p1') {
+        pts1 = calculatePoints('p1', c1, c2);
+        msg1 = `⚔ You win — ${c1.name} beats ${c2.name} · +${pts1}`;
+        msg2 = `☠ Opponent wins — ${c1.name} beats ${c2.name}`;
+    } else if (winner === 'p2') {
+        pts2 = calculatePoints('p2', c1, c2);
+        msg1 = `☠ Opponent wins — ${c2.name} beats ${c1.name}`;
+        msg2 = `⚔ You win — ${c2.name} beats ${c1.name} · +${pts2}`;
     } else {
-        resultMessage1 = `Tied — both played ${card1.name}`;
-        resultMessage2 = `Tied — both played ${card2.name}`;
+        msg1 = msg2 = `— Draw — both played ${c1.name}`;
     }
 
-    game.player1Score += points1;
-    game.player2Score += points2;
+    game.player1Score += pts1;
+    game.player2Score += pts2;
 
-    game.player1History.push(card1);
-    game.player2History.push(card2);
+    game.player1History.push(c1);
+    game.player2History.push(c2);
 
-    game.player1Hand.splice(card1Index, 1);
-    game.player2Hand.splice(card2Index, 1);
+    game.player1Hand.splice(i1, 1);
+    game.player2Hand.splice(i2, 1);
 
-    game.currentTurn++;
+    // A round ends immediately when any player wins a trick (meaning King or Slave was involved)
+    // or if hands are empty (which only happens if they draw 4 times then play the 5th)
+    const kingPlayed = c1.type === 'king' || c2.type === 'king';
+    const handsEmpty = game.player1Hand.length === 0 || game.player2Hand.length === 0;
+    const roundEnded = winner !== 'tie' || handsEmpty;
 
-    // Round ends if hands are empty OR if someone played a King
-    const roundEnded = game.player1Hand.length === 0 || 
-                       game.player2Hand.length === 0 ||
-                       card1.type === 'king' || 
-                       card2.type === 'king';
-    
-    let gameOver = false, winner_name = null;
+    const totalRounds = game.totalGames * game.roundsPerGame; // 12
+    const matchOver = roundEnded && game.overallRound >= totalRounds;
 
-    // Full game end: last round, last turn
-    if (game.currentRound >= game.totalRounds && roundEnded) {
+    let gameOver = false, winnerName = null;
+    if (matchOver) {
         gameOver = true;
-        winner_name = game.player1Score > game.player2Score ? 'player1'
-                    : game.player2Score > game.player1Score ? 'player2'
-                    : 'tie';
-        game.gameOver = gameOver;
-        game.winner   = winner_name;
+        winnerName = game.player1Score > game.player2Score ? 'player1'
+                   : game.player2Score > game.player1Score ? 'player2'
+                   : 'tie';
+        game.gameOver = true;
+        game.winner   = winnerName;
     }
 
     return {
-        roundResultFor: { player1: resultMessage1, player2: resultMessage2 },
+        roundResultFor: { player1: msg1, player2: msg2 },
         player1Score: game.player1Score,
         player2Score: game.player2Score,
-        player1Card: card1,
-        player2Card: card2,
-        gameOver,
-        winner: winner_name,
-        roundEnded
+        player1Card: c1, player2Card: c2,
+        kingPlayed, roundEnded, gameOver,
+        winner: winnerName,
+        pts1, pts2
     };
 }
 
-module.exports = { CARDS, initializeDecks, createGame, getWinner, calculatePoints, applyPlay };
+// ── Advance to next round / game ───────────────────
+function advanceToNextRound(game) {
+    game.overallRound++;
+    game.roundInGame++;
+
+    // Check if we need to move to the next game
+    if (game.roundInGame > game.roundsPerGame) {
+        game.gameNumber++;
+        game.roundInGame = 1;
+
+        // Flip roles for the new game
+        game.player1Role = game.player1Role === 'king' ? 'slave' : 'king';
+        game.player2Role = game.player2Role === 'king' ? 'slave' : 'king';
+    }
+
+    // Fresh hands for this round
+    const p1IsKing = game.player1Role === 'king';
+    const { deck1, deck2 } = initializeDecks(p1IsKing);
+    game.player1Hand = deck1;
+    game.player2Hand = deck2;
+    game.player1History = [];
+    game.player2History = [];
+
+    // Who plays first this game?
+    // Odd games (1,3): King plays first.  Even games (2,4): Slave plays first.
+    const kingGoesFirst = game.gameNumber % 2 === 1;
+
+    return {
+        gameNumber:   game.gameNumber,
+        roundInGame:  game.roundInGame,
+        overallRound: game.overallRound,
+        player1Role:  game.player1Role,
+        player2Role:  game.player2Role,
+        player1Hand:  game.player1Hand,
+        player2Hand:  game.player2Hand,
+        kingGoesFirst
+    };
+}
+
+module.exports = { CARDS, initializeDecks, createGame, applyPlay, advanceToNextRound };
